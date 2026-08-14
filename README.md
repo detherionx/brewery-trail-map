@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Franconian Brewery Trail Map
 
-## Getting Started
+Personal travel-blog feature: an interactive map of Franconian breweries across hiking trails
+(13-Brauereien-Weg, Aufseß, Bamberg city, and custom recommendations), built around my own
+ratings, comments, and visit history. Google Maps is infrastructure/enrichment, not the content.
 
-First, run the development server:
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.local.example .env.local   # then fill in the values below
+pnpm db:push                       # creates data/brewery.db with all tables
+pnpm seed                          # inserts sample regions/breweries/trails for local dev
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open:
+- `/franconia/breweries` — full atlas, all trails + filters
+- `/blog/13-brauereien-weg` — demo article showing the embedded, trail-scoped widget
+- `/admin/breweries` — editorial admin (password-gated)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment variables (`.env.local`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Maps JavaScript API key. Without it, the map renders a placeholder instead of failing. |
+| `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID` | Required for `AdvancedMarkerElement`. Create one under Google Cloud Console → Maps Platform → Map Management. Falls back to Google's public `DEMO_MAP_ID` for local testing (limited styling, not for production). |
+| `GOOGLE_PLACES_API_KEY` | Server-only key used by `pnpm refresh:google` to pull cached rating/opening-hours data (Places API (New)). |
+| `ADMIN_PASSWORD` | Shared password gating `/admin/*`. |
+| `ADMIN_SESSION_SECRET` | Random secret signing the admin session cookie. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. |
+| `DATABASE_PATH` | Defaults to `./data/brewery.db`. |
 
-## Learn More
+## Scripts
 
-To learn more about Next.js, take a look at the following resources:
+- `pnpm db:push` / `pnpm db:generate` / `pnpm db:studio` — Drizzle schema push/migration-generate/studio.
+- `pnpm seed` — inserts sample regions, breweries, and trails (idempotent-unsafe; run once against a fresh DB).
+- `pnpm import:trail <trail-slug> <path-to-file.gpx|.kml>` — parses a GPX/KML file into a GeoJSON
+  `LineString` and stores it on `trails.geometry`. The trail row must already exist (e.g. via `pnpm seed`).
+  No real trail files are bundled — supply your own for 13-Brauereien-Weg and Aufseß.
+- `pnpm refresh:google` — pulls `rating` / `userRatingCount` / `googleMapsUri` / `currentOpeningHours`
+  from Places API (New) for every brewery with a `google_place_id`, and writes them into the cached
+  `google_*` columns. Never touches editorial fields (`my_rating`, `my_comment`, etc.). Not run
+  automatically — call it manually or on a schedule.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Data model
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+See `src/db/schema.ts` for the full Drizzle schema: `regions`, `breweries`, `trails`,
+`trail_breweries` (join table with `sequence`), and `recommendations` (triage inbox, separate from
+a brewery's own `my_comment`).
 
-## Deploy on Vercel
+## Marker visual language
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Fill color: Bavarian blue = open now, grey = closed/unknown (`google_open_now`, refreshed via
+  `pnpm refresh:google`, overridable per-brewery via `opening_hours_override`/`opening_hours_note`
+  shown in the info card).
+- White ring = visited by me.
+- Click enlarges the marker (selected state) rather than changing its color language.
+- Featured star is deferred to phase 2, as is the screenshot → candidate-brewery ingestion
+  pipeline, opening-hours staleness UI, and any public-facing rating/comment submission.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Admin
+
+`/admin/*` is gated by a single shared password (`ADMIN_PASSWORD`) via `src/middleware.ts` — an
+httpOnly signed cookie, not a full auth system. Good enough for a single-editor personal blog;
+revisit if this ever needs multiple editors or public-facing submissions.
